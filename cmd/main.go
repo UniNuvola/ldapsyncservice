@@ -21,6 +21,8 @@ const (
 	statusApproved = "approved"
 	statusSynced   = "synced"
 	statusPostfix  = ":status"
+	passCheck      = 10
+	delay          = 60
 )
 
 var config = flag.String("config", "", "path to config file")
@@ -110,7 +112,7 @@ func main() {
 				}
 				break loop
 
-			case <-time.After(50 * time.Second):
+			case <-time.After(delay * time.Second):
 				if c.debug {
 					fmt.Println("Period manager: Triggering sync")
 				}
@@ -167,7 +169,7 @@ func (c *SyncConfig) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (c *SyncConfig) syncData() {
+func (c *SyncConfig) syncData(pwCheck bool) {
 	// sync data from source to destination
 	if c.debug {
 		fmt.Println("Starting sync")
@@ -182,7 +184,7 @@ func (c *SyncConfig) syncData() {
 		fmt.Println("Uids to sync: ", uids2sync)
 	}
 
-	err = c.syncUsers(uids2sync)
+	err = c.syncUsers(uids2sync, pwCheck)
 	if err != nil {
 		fmt.Println("Warning: Unable to sync users. Err=", err)
 	}
@@ -200,9 +202,10 @@ func (c *SyncConfig) start(ctx context.Context) {
 	}
 
 	trigger := c.trigger
-
+	i := 0
 loop:
 	for {
+		i++
 		select {
 		case <-ctx.Done():
 			// The context is over, stop processing
@@ -215,7 +218,10 @@ loop:
 			if c.debug {
 				fmt.Println("Sync manager: Received trigger")
 			}
-			c.syncData()
+			c.syncData(i == passCheck)
+			if i == passCheck {
+				i = 0
+			}
 		}
 	}
 
@@ -302,7 +308,7 @@ func (c *SyncConfig) getRedis() (redis.Conn, error) {
 	return r, nil
 }
 
-func (c *SyncConfig) syncUsers(uids []string) error {
+func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 
 	// Bind the source and destination LDAP servers - ls,ld
 	ls, err := ldap.DialURL(c.env["LDAP_SOURCE_URI"])
@@ -328,6 +334,9 @@ func (c *SyncConfig) syncUsers(uids []string) error {
 	}
 
 	for _, uid := range uids {
+
+		userExists := false
+
 		// Check if user exists in the destination LDAP server
 		searchRequest := ldap.NewSearchRequest(
 			c.env["LDAP_DESTINATION_BASEDN"],
@@ -335,9 +344,11 @@ func (c *SyncConfig) syncUsers(uids []string) error {
 			ldap.NeverDerefAliases,
 			0, 0, false,
 			"(uid="+uid+")",
-			[]string{"dn"},
+			[]string{"dn", "cn", "uid", "mail", "sn", "givenName", "userPassword"},
 			nil,
 		)
+
+		destPassword := ""
 
 		sr, err := ld.Search(searchRequest)
 		if err != nil {
@@ -350,19 +361,19 @@ func (c *SyncConfig) syncUsers(uids []string) error {
 		}
 
 		if len(sr.Entries) == 1 {
+			userExists = true
 			if c.debug {
 				fmt.Println("User exists in destination LDAP server. uid=" + uid)
 			}
-			// Mark user as synced
-			err = c.markSynced(uid)
-			if err != nil {
-				return err
+			if !pwCheck {
+				// Mark user as synced
+				err = c.markSynced(uid)
+				if err != nil {
+					return err
+				}
+				continue
 			}
-			continue
-		}
-
-		if c.debug {
-			fmt.Println("User does not exist in destination LDAP server. uid=" + uid)
+			destPassword = sr.Entries[0].GetAttributeValue("userPassword")
 		}
 
 		// Get user details from source LDAP server
@@ -392,40 +403,83 @@ func (c *SyncConfig) syncUsers(uids []string) error {
 		userGivenName := newUser.Entries[0].GetAttributeValue("givenName")
 		userPassword := newUser.Entries[0].GetAttributeValue("userPassword")
 
-		if c.debug {
-			fmt.Println("User to create: ", userDN, userSN, userEmail, userGivenName)
+		if !userExists {
+			// User does not exist in the destination LDAP server, create the user
+			if c.debug {
+				fmt.Println("User does not exist in destination LDAP server. uid=" + uid)
+			}
+
+			if c.debug {
+				fmt.Println("User to create: ", userDN, userSN, userEmail, userGivenName)
+			}
+
+			addRequest := ldap.NewAddRequest(
+				"uid="+uid+","+c.env["LDAP_DESTINATION_BASEDN"],
+				[]ldap.Control{},
+			)
+
+			addRequest.Attribute("objectClass", []string{"inetOrgPerson"})
+			addRequest.Attribute("cn", []string{userGivenName + " " + userSN})
+			addRequest.Attribute("sn", []string{userSN})
+			addRequest.Attribute("givenName", []string{userGivenName})
+			addRequest.Attribute("mail", []string{userEmail})
+			addRequest.Attribute("uid", []string{uid})
+			addRequest.Attribute("userPassword", []string{userPassword})
+
+			err = ld.Add(addRequest)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
+			// Mark user as synced
+			err = c.markSynced(uid)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
+			if c.debug {
+				fmt.Println("User created successfully. uid=" + uid)
+			}
+		} else {
+			// The user exists in the destination LDAP server but the password needs to be checked
+			if destPassword != userPassword {
+				if c.debug {
+					fmt.Println("User password needs to be updated. uid=" + uid)
+				}
+
+				modifyRequest := ldap.NewModifyRequest(userDN, []ldap.Control{})
+				modifyRequest.Replace("userPassword", []string{userPassword})
+
+				err = ld.Modify(modifyRequest)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+
+				// Mark user as synced
+				err = c.markSynced(uid)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+
+				if c.debug {
+					fmt.Println("User password updated successfully. uid=" + uid)
+				}
+			} else {
+				if c.debug {
+					fmt.Println("User password is up to date. uid=" + uid)
+				}
+				// Mark user as synced
+				err = c.markSynced(uid)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+			}
 		}
-
-		addRequest := ldap.NewAddRequest(
-			"uid="+uid+","+c.env["LDAP_DESTINATION_BASEDN"],
-			[]ldap.Control{},
-		)
-
-		addRequest.Attribute("objectClass", []string{"inetOrgPerson"})
-		addRequest.Attribute("cn", []string{userGivenName + " " + userSN})
-		addRequest.Attribute("sn", []string{userSN})
-		addRequest.Attribute("givenName", []string{userGivenName})
-		addRequest.Attribute("mail", []string{userEmail})
-		addRequest.Attribute("uid", []string{uid})
-		addRequest.Attribute("userPassword", []string{userPassword})
-
-		err = ld.Add(addRequest)
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-
-		// Mark user as synced
-		err = c.markSynced(uid)
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-
-		if c.debug {
-			fmt.Println("User created successfully. uid=" + uid)
-		}
-
 	}
 	return nil
 }
