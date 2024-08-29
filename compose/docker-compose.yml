@@ -1,0 +1,12 @@
+services:
+    redis:
+        networks:
+            uninuvola:
+                ipv4_address: ${LDAPSYNC_IP}
+        container_name: ldapsync
+        image: harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
+        command: /ldapsyncservice -d
+
+networks:
+  uninuvola:
+    external: true
