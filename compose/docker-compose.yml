@@ -6,7 +6,7 @@ services:
         container_name: ldapsync
         image: harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
         command: /ldapsyncservice -d
-
+        env_file: .env
 networks:
   uninuvola:
     external: true
