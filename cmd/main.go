@@ -129,7 +129,7 @@ func main() {
 		fmt.Println("Starting web server")
 	}
 	s := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":80",
 		Handler: http.HandlerFunc(c.handle),
 	}
 
