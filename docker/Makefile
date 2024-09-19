@@ -1,5 +1,9 @@
 DEPLOYED=
 
+.PHONY: all 
+all: compile build push tag
+
+
 .PHONY: compile
 compile:
 	cd .. && make
@@ -10,10 +14,9 @@ build:
 
 .PHONY: build
 push:
-	docker push harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest 
+	docker push harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d)
 
-.PHONY: build
+.PHONY: tag
 tag:
-
-.PHONY: all 
-all: compile build push
+	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d) in harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
+	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(DEPLOYED) in harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice
