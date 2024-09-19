@@ -1,6 +1,6 @@
 EXE=ldapsyncservice
 
-.PHONY: build push clean
+.PHONY: clean
 
 
 $(EXE): cmd/*.go
