@@ -24,7 +24,9 @@ build: check
 push: check
 	docker push $(IMAGE):$(shell date +%Y-%m-%d)
 	docker tag $(IMAGE):$(shell date +%Y-%m-%d) $(IMAGE):latest
+	docker push $(IMAGE):latest
 
 .PHONY: tag
 tag: check
 	docker tag $(IMAGE):$(DEPLOYED) $(IMAGE):deployed
+	docker push $(IMAGE):deployed
