@@ -12,11 +12,11 @@ compile:
 build:
 	docker build -t harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice .
 
-.PHONY: build
+.PHONY: push
 push:
 	docker push harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d)
+	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d) in harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
 
 .PHONY: tag
 tag:
-	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d) in harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
 	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(DEPLOYED) in harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice
