@@ -1,22 +1,30 @@
-DEPLOYED=
+include buildinfo.mk
 
 .PHONY: all 
-all: compile build push tag
+all: check compile build push tag
 
+.PHONY: check
+check:
+ifeq ($(IMAGE),)
+	$(error "Missing IMAGE")
+endif
+ifeq ($(DEPLOYED),)
+	$(error "Missing DEPLOYED")
+endif
 
 .PHONY: compile
 compile:
 	cd .. && make
 
 .PHONY: build
-build:
-	docker build -t harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice .
+build: check
+	docker build -t $(IMAGE):$(shell date +%Y-%m-%d) .
 
 .PHONY: push
-push:
-	docker push harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d)
-	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d) harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
+push: check
+	docker push $(IMAGE):$(shell date +%Y-%m-%d)
+	docker tag $(IMAGE):$(shell date +%Y-%m-%d) $(IMAGE):latest
 
 .PHONY: tag
-tag:
-	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(DEPLOYED) harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:deployed
+tag: check
+	docker tag $(IMAGE):$(DEPLOYED) $(IMAGE):deployed
