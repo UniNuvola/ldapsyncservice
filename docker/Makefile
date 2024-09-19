@@ -15,8 +15,8 @@ build:
 .PHONY: push
 push:
 	docker push harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d)
-	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d) in harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
+	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(date +%Y-%m-%d) harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest
 
 .PHONY: tag
 tag:
-	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(DEPLOYED) in harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice
+	docker tag harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:$(DEPLOYED) harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:deployed
