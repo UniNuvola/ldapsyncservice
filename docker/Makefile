@@ -1,12 +1,19 @@
-.PHOY: all
+DEPLOYED=
 
+.PHONY: compile
 compile:
 	cd .. && make
 
-build: $(EXE)
+.PHONY: build
+build:
 	docker build -t harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice .
 
-push: build
+.PHONY: build
+push:
 	docker push harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:latest 
 
+.PHONY: build
+tag:
+
+.PHONY: all 
 all: compile build push
