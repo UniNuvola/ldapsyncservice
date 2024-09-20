@@ -18,8 +18,7 @@ compile:
 
 .PHONY: build
 build: check
-	cd ../ && \ 
-		docker build -t $(IMAGE):$(shell date +%Y-%m-%d) -f docker/Dockerfile .
+	cd ../ && docker build -t $(IMAGE):$(shell date +%Y-%m-%d) -f docker/Dockerfile .
 
 .PHONY: push
 push: check
