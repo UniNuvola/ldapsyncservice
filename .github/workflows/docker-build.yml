@@ -16,6 +16,10 @@ jobs:
         go-version: '^1.13.1'
     - name: Compile project
       run: cd docker && make compile
+    - uses: actions/upload-artifact@v4
+      with:
+        name: exe
+        path: ldapsyncservice
 
   build:
     needs: compile
@@ -23,5 +27,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: exe
     - name: Build the Docker image
       run: cd docker && make build
