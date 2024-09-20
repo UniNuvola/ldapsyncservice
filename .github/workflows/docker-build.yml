@@ -1,0 +1,24 @@
+name: Build Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+    pull_request: [ "main" ]
+
+jobs:
+  compile:
+    runs-on: self-hosted
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build the Docker image
+      run: cd docker && make compile
+
+  build:
+    needs: compile
+    runs-on: self-hosted
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build the Docker image
+      run: cd docker && make build
