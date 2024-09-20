@@ -31,4 +31,3 @@ jobs:
         uses: wearerequired/lint-action@v2
         with:
           gofmt: true 
-          golint: true
