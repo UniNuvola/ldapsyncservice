@@ -17,10 +17,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// req:userid:status -> string
+// req:userid:groups -> set
+
+// req:userid:password -> string
+
 const (
 	statusApproved = "approved"
 	statusSynced   = "synced"
-	statusPostfix  = ":status"
+	statusPostfix  = "status"
+	prefix         = "req"
 	passCheck      = 10
 	delay          = 60
 )
@@ -32,6 +38,13 @@ type SyncConfig struct {
 	debug   bool
 	env     map[string]string
 	trigger chan struct{}
+}
+
+type user struct {
+	uid       string
+	groups    []string
+	password  string
+	uidNumber string
 }
 
 func init() {
@@ -129,7 +142,7 @@ func main() {
 		fmt.Println("Starting web server")
 	}
 	s := &http.Server{
-		Addr:    ":80",
+		Addr:    ":8066",
 		Handler: http.HandlerFunc(c.handle),
 	}
 
@@ -175,6 +188,13 @@ func (c *SyncConfig) syncData(pwCheck bool) {
 		fmt.Println("Starting sync")
 	}
 
+	alreadySyncedUids, err := c.getSyncedUids()
+	if err != nil {
+		fmt.Println("Warning: Unable to get synced uids from ldap. Err=", err)
+	}
+
+	fmt.Println("Already synced uids: ", alreadySyncedUids)
+
 	uids2sync, err := c.getUids2Sync()
 	if err != nil {
 		fmt.Println("Warning: Unable to get uids to sync from redis. Err=", err)
@@ -184,7 +204,7 @@ func (c *SyncConfig) syncData(pwCheck bool) {
 		fmt.Println("Uids to sync: ", uids2sync)
 	}
 
-	err = c.syncUsers(uids2sync, pwCheck)
+	err = c.syncUsers(alreadySyncedUids, uids2sync, pwCheck)
 	if err != nil {
 		fmt.Println("Warning: Unable to sync users. Err=", err)
 	}
@@ -241,7 +261,7 @@ func (c *SyncConfig) markSynced(uid string) error {
 	}
 	defer r.Close()
 
-	status, err := redis.String(r.Do("GET", uid+statusPostfix))
+	status, err := redis.String(r.Do("GET", prefix+":"+uid+":"+statusPostfix))
 	if err != nil {
 		return err
 	}
@@ -250,34 +270,85 @@ func (c *SyncConfig) markSynced(uid string) error {
 		return errors.New("Invalid status: " + status)
 	}
 
-	_, err = r.Do("SET", uid+statusPostfix, statusSynced)
+	_, err = r.Do("SET", prefix+":"+uid+":"+statusPostfix, statusSynced)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *SyncConfig) getUids2Sync() ([]string, error) {
+func (c *SyncConfig) getSyncedUids() ([]user, error) {
+	ld, err := ldap.DialURL(c.env["LDAP_DESTINATION_URI"])
+	if err != nil {
+		return nil, err
+	}
+	defer ld.Close()
+
+	err = ld.Bind(c.env["LDAP_DESTINATION_BINDDN"], c.env["LDAP_DESTINATION_PASSWORD"])
+	if err != nil {
+		return nil, err
+	}
+
+	syncedUids := make([]user, 0)
+
+	searchRequest := ldap.NewSearchRequest(
+		c.env["LDAP_DESTINATION_BASEDN"],
+		ldap.ScopeWholeSubtree,
+		ldap.NeverDerefAliases,
+		0, 0, false,
+		"(objectClass=posixAccount)",
+		[]string{"uid"},
+		nil,
+	)
+
+	sr, err := ld.Search(searchRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range sr.Entries {
+		uid := entry.GetAttributeValue("uid")
+		user := user{uid, nil, "", ""}
+		syncedUids = append(syncedUids, user)
+	}
+
+	return syncedUids, nil
+}
+
+func (c *SyncConfig) getUids2Sync() ([]user, error) {
 	r, err := c.getRedis()
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
 
-	allUids, err := redis.Strings(r.Do("KEYS", "*"+statusPostfix))
+	allKeys, err := redis.Strings(r.Do("KEYS", prefix+":*:"+statusPostfix))
 	if err != nil {
 		return nil, err
 	}
 
-	uids2sync := []string{}
-	for _, uid := range allUids {
-		status, err := redis.String(r.Do("GET", uid))
+	uids2sync := make([]user, 0)
+	for _, key := range allKeys {
+		uid := strings.Split(key, ":")[1]
+		status, err := redis.String(r.Do("GET", key))
 		if err != nil {
 			return nil, err
 		}
+		groups, err := redis.Strings(r.Do("SMEMBERS", prefix+":"+uid+":groups"))
+		if err != nil {
+			groups = make([]string, 0)
+		}
+		password, err := redis.String(r.Do("GET", prefix+":"+uid+":password"))
+		if err != nil {
+			password = ""
+		}
+		uidNumber, err := redis.String(r.Do("GET", prefix+":"+uid+":uidNumber"))
+		if err != nil {
+			uidNumber = ""
+		}
 		if status == statusApproved || status == statusSynced {
-			uid = strings.Split(uid, ":")[0]
-			uids2sync = append(uids2sync, uid)
+			user := user{uid, groups, password, uidNumber}
+			uids2sync = append(uids2sync, user)
 		}
 	}
 
@@ -308,7 +379,17 @@ func (c *SyncConfig) getRedis() (redis.Conn, error) {
 	return r, nil
 }
 
-func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
+func (c *SyncConfig) groupsUpdate(ld *ldap.Conn, username string, groups []string) error {
+	// TODO: Implement groups update
+	return nil
+}
+
+func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error {
+
+	alreadyMap := make(map[string]struct{})
+	for _, u := range already {
+		alreadyMap[u.uid] = struct{}{}
+	}
 
 	// Bind the source and destination LDAP servers - ls,ld
 	ls, err := ldap.DialURL(c.env["LDAP_SOURCE_URI"])
@@ -333,7 +414,12 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 		return err
 	}
 
-	for _, uid := range uids {
+	for _, u := range users {
+
+		uid := u.uid
+		localPassword := u.password
+		groups := u.groups
+		localUidNumber := u.uidNumber
 
 		userExists := false
 
@@ -362,6 +448,7 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 
 		if len(sr.Entries) == 1 {
 			userExists = true
+			delete(alreadyMap, uid)
 			if c.debug {
 				fmt.Println("User exists in destination LDAP server. uid=" + uid)
 			}
@@ -371,9 +458,17 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 				if err != nil {
 					return err
 				}
+				err = c.groupsUpdate(ld, uid, groups)
+				if err != nil {
+					return err
+				}
 				continue
 			}
-			destPassword = sr.Entries[0].GetAttributeValue("userPassword")
+			if localPassword == "" {
+				destPassword = sr.Entries[0].GetAttributeValue("userPassword")
+			} else {
+				destPassword = localPassword
+			}
 		}
 
 		// Get user details from source LDAP server
@@ -383,7 +478,7 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 			ldap.NeverDerefAliases,
 			0, 0, false,
 			"(uid="+uid+")",
-			[]string{"dn", "cn", "uid", "mail", "sn", "givenName", "userPassword"},
+			[]string{"dn", "cn", "uid", "mail", "sn", "givenName", "userPassword", "uidNumber", "homeDirectory"},
 			nil,
 		)
 
@@ -392,16 +487,33 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 			return err
 		}
 
-		if len(newUser.Entries) != 1 {
-			fmt.Println("WARNING: User does not exist or too many entries returned")
-			continue
-		}
+		var userDN, userSN, userEmail, userGivenName, userPassword, uidNumber, homeDirectory string
 
-		userDN := newUser.Entries[0].DN
-		userSN := newUser.Entries[0].GetAttributeValue("sn")
-		userEmail := newUser.Entries[0].GetAttributeValue("mail")
-		userGivenName := newUser.Entries[0].GetAttributeValue("givenName")
-		userPassword := newUser.Entries[0].GetAttributeValue("userPassword")
+		if len(newUser.Entries) == 0 {
+			if localPassword == "" || localUidNumber == "" {
+				fmt.Println("Warning: User not found in source LDAP server. uid=" + uid)
+				continue
+			} else {
+				userSN = uid
+				userEmail = uid + "@uninuvolafakeemail.it"
+				userGivenName = "Local User"
+				userPassword = localPassword
+				uidNumber = localUidNumber
+				homeDirectory = "/home/" + uid
+				userDN = userGivenName + " " + userSN
+			}
+		} else if len(newUser.Entries) > 1 {
+			fmt.Println("Warning: Multiple entries found for uid=" + uid)
+			continue
+		} else {
+			userDN = newUser.Entries[0].DN
+			userSN = newUser.Entries[0].GetAttributeValue("sn")
+			userEmail = newUser.Entries[0].GetAttributeValue("mail")
+			userGivenName = newUser.Entries[0].GetAttributeValue("givenName")
+			userPassword = newUser.Entries[0].GetAttributeValue("userPassword")
+			uidNumber = newUser.Entries[0].GetAttributeValue("uidNumber")
+			homeDirectory = newUser.Entries[0].GetAttributeValue("homeDirectory")
+		}
 
 		if !userExists {
 			// User does not exist in the destination LDAP server, create the user
@@ -414,16 +526,19 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 			}
 
 			addRequest := ldap.NewAddRequest(
-				"uid="+uid+","+c.env["LDAP_DESTINATION_BASEDN"],
+				"cn="+userGivenName+" "+userSN+","+c.env["LDAP_DESTINATION_BASEDN"],
 				[]ldap.Control{},
 			)
 
-			addRequest.Attribute("objectClass", []string{"inetOrgPerson"})
+			addRequest.Attribute("objectClass", []string{"inetOrgPerson", "posixAccount"})
 			addRequest.Attribute("cn", []string{userGivenName + " " + userSN})
 			addRequest.Attribute("sn", []string{userSN})
 			addRequest.Attribute("givenName", []string{userGivenName})
 			addRequest.Attribute("mail", []string{userEmail})
 			addRequest.Attribute("uid", []string{uid})
+			addRequest.Attribute("uidNumber", []string{uidNumber})
+			addRequest.Attribute("homeDirectory", []string{homeDirectory})
+			addRequest.Attribute("gidNumber", []string{"500"})
 			addRequest.Attribute("userPassword", []string{userPassword})
 
 			err = ld.Add(addRequest)
@@ -434,6 +549,11 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 
 			// Mark user as synced
 			err = c.markSynced(uid)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			err = c.groupsUpdate(ld, uid, groups)
 			if err != nil {
 				fmt.Println(err)
 				continue
@@ -464,7 +584,11 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 					fmt.Println(err)
 					continue
 				}
-
+				err = c.groupsUpdate(ld, uid, groups)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
 				if c.debug {
 					fmt.Println("User password updated successfully. uid=" + uid)
 				}
@@ -478,8 +602,16 @@ func (c *SyncConfig) syncUsers(uids []string, pwCheck bool) error {
 					fmt.Println(err)
 					continue
 				}
+				err = c.groupsUpdate(ld, uid, groups)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
 			}
 		}
 	}
+
+	fmt.Println("Users to delete: ", alreadyMap)
+	// TODO: Implement user deletion
 	return nil
 }
