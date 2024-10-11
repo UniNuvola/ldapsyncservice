@@ -613,5 +613,6 @@ func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error
 
 	fmt.Println("Users to delete: ", alreadyMap)
 	// TODO: Implement user deletion
+
 	return nil
 }
