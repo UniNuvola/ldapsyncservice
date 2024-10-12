@@ -1,13 +1,13 @@
 EXE=ldapsyncservice
 
-.PHONY: clean
-
+.PHONY: all
+all: $(EXE)
 
 $(EXE): cmd/*.go
 	cd cmd/ && \
 	CGO_ENABLED=0 go build && \
-	mv cmd ../ldapsyncservice
+	mv cmd ../$(EXE)
 
-
+.PHONY: clean
 clean:
-	rm -f ldapsyncservice
+	rm -f $(EXE)
