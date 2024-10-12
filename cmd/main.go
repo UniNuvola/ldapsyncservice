@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,18 +61,19 @@ func main() {
 	}
 
 	env := map[string]string{
-		"LDAP_SOURCE_URI":           os.Getenv("LDAP_SOURCE_URI"),
-		"LDAP_SOURCE_BASEDN":        os.Getenv("LDAP_SOURCE_BASEDN"),
-		"LDAP_SOURCE_BINDDN":        os.Getenv("LDAP_SOURCE_BINDDN"),
-		"LDAP_SOURCE_PASSWORD":      os.Getenv("LDAP_SOURCE_PASSWORD"),
-		"LDAP_DESTINATION_URI":      os.Getenv("LDAP_DESTINATION_URI"),
-		"LDAP_DESTINATION_BASEDN":   os.Getenv("LDAP_DESTINATION_BASEDN"),
-		"LDAP_DESTINATION_BINDDN":   os.Getenv("LDAP_DESTINATION_BINDDN"),
-		"LDAP_DESTINATION_PASSWORD": os.Getenv("LDAP_DESTINATION_PASSWORD"),
-		"REDIS_URI":                 os.Getenv("REDIS_URI"),
-		"REDIS_DATABASE":            os.Getenv("REDIS_DATABASE"),
-		"REDIS_USERNAME":            os.Getenv("REDIS_USERNAME"),
-		"REDIS_PASSWORD":            os.Getenv("REDIS_PASSWORD"),
+		"LDAP_SOURCE_URI":                os.Getenv("LDAP_SOURCE_URI"),
+		"LDAP_SOURCE_BASEDN":             os.Getenv("LDAP_SOURCE_BASEDN"),
+		"LDAP_SOURCE_BINDDN":             os.Getenv("LDAP_SOURCE_BINDDN"),
+		"LDAP_SOURCE_PASSWORD":           os.Getenv("LDAP_SOURCE_PASSWORD"),
+		"LDAP_DESTINATION_URI":           os.Getenv("LDAP_DESTINATION_URI"),
+		"LDAP_DESTINATION_USERS_BASEDN":  os.Getenv("LDAP_DESTINATION_USERS_BASEDN"),
+		"LDAP_DESTINATION_GROUPS_BASEDN": os.Getenv("LDAP_DESTINATION_GROUPS_BASEDN"),
+		"LDAP_DESTINATION_BINDDN":        os.Getenv("LDAP_DESTINATION_BINDDN"),
+		"LDAP_DESTINATION_PASSWORD":      os.Getenv("LDAP_DESTINATION_PASSWORD"),
+		"REDIS_URI":                      os.Getenv("REDIS_URI"),
+		"REDIS_DATABASE":                 os.Getenv("REDIS_DATABASE"),
+		"REDIS_USERNAME":                 os.Getenv("REDIS_USERNAME"),
+		"REDIS_PASSWORD":                 os.Getenv("REDIS_PASSWORD"),
 	}
 
 	c.env = env
@@ -292,7 +294,7 @@ func (c *SyncConfig) getSyncedUids() ([]user, error) {
 	syncedUids := make([]user, 0)
 
 	searchRequest := ldap.NewSearchRequest(
-		c.env["LDAP_DESTINATION_BASEDN"],
+		c.env["LDAP_DESTINATION_USERS_BASEDN"],
 		ldap.ScopeWholeSubtree,
 		ldap.NeverDerefAliases,
 		0, 0, false,
@@ -380,7 +382,70 @@ func (c *SyncConfig) getRedis() (redis.Conn, error) {
 }
 
 func (c *SyncConfig) groupsUpdate(ld *ldap.Conn, username string, groups []string) error {
-	// TODO: Implement groups update
+	// Get all the possible groups from the destination LDAP server
+	searchRequest := ldap.NewSearchRequest(
+		c.env["LDAP_DESTINATION_GROUPS_BASEDN"],
+		ldap.ScopeSingleLevel,
+		ldap.NeverDerefAliases,
+		0, 0, false,
+		"(objectClass=posixGroup)",
+		[]string{"cn"},
+		nil,
+	)
+
+	sr, err := ld.Search(searchRequest)
+	if err != nil {
+		return err
+	}
+
+	if len(sr.Entries) == 0 {
+		return errors.New("no groups found")
+	}
+
+	allGroups := make([]string, len(sr.Entries))
+
+	for i, e := range sr.Entries {
+		cn := e.GetAttributeValue("cn")
+		allGroups[i] = cn
+	}
+
+	// Get the user's current groups
+	searchRequest = ldap.NewSearchRequest(
+		c.env["LDAP_DESTINATION_GROUPS_BASEDN"],
+		ldap.ScopeWholeSubtree,
+		ldap.NeverDerefAliases,
+		0, 0, false,
+		"(&(objectClass=posixGroup)(memberUid="+username+"))",
+		[]string{"cn"},
+		nil,
+	)
+
+	sr, err = ld.Search(searchRequest)
+	if err != nil {
+		return err
+	}
+
+	currentGroups := make([]string, len(sr.Entries))
+
+	for i, e := range sr.Entries {
+		cn := e.GetAttributeValue("cn")
+		currentGroups[i] = cn
+	}
+
+	fmt.Println("Current groups: ", currentGroups)
+
+	for _, g := range currentGroups {
+		if !slices.Contains(groups, g) {
+			// TODO Remove user from group
+		}
+	}
+
+	for _, g := range groups {
+		if !slices.Contains(currentGroups, g) {
+			// TODO Add user to group
+		}
+	}
+
 	return nil
 }
 
@@ -425,7 +490,7 @@ func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error
 
 		// Check if user exists in the destination LDAP server
 		searchRequest := ldap.NewSearchRequest(
-			c.env["LDAP_DESTINATION_BASEDN"],
+			c.env["LDAP_DESTINATION_USERS_BASEDN"],
 			ldap.ScopeWholeSubtree,
 			ldap.NeverDerefAliases,
 			0, 0, false,
@@ -526,7 +591,7 @@ func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error
 			}
 
 			addRequest := ldap.NewAddRequest(
-				"cn="+userGivenName+" "+userSN+","+c.env["LDAP_DESTINATION_BASEDN"],
+				"cn="+userGivenName+" "+userSN+","+c.env["LDAP_DESTINATION_USERS_BASEDN"],
 				[]ldap.Control{},
 			)
 
