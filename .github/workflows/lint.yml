@@ -44,4 +44,4 @@ jobs:
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           title: 'lint'
-          input: './superlinter.json'
+          input: './super-linter-output'
