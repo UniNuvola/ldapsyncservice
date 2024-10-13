@@ -35,3 +35,13 @@ jobs:
           # To report GitHub Actions status checks
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DISABLE_ERRORS: true
+          SAVE_SUPER_LINTER_OUTPUT: true
+
+      - run: ls -l
+
+      - name: Annotate
+        uses: yuzutech/annotations-action@v0.4.0
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          title: 'lint'
+          input: './superlinter.json'
