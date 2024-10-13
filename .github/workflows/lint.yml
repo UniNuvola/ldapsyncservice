@@ -8,26 +8,29 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# Down scope as necessary via https://docs.github.com/en/actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token
-permissions:
-  checks: write
-  contents: write
+permissions: {}
 
 jobs:
   run-linters:
     name: Run linters
     runs-on: ubuntu-latest
 
+    permissions:
+          contents: read
+          packages: read
+          # To report GitHub Actions status checks
+          statuses: write
+
     steps:
-      - name: Check out Git repository
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      # Install your linters here
-      - uses: actions/setup-go@v5
         with:
-          go-version: '^1.13.1'
+          # super-linter needs the full git history to get the
+          # list of files that changed across commits
+          fetch-depth: 0
 
-      - name: Run linters
-        uses: wearerequired/lint-action@v2
-        with:
-          gofmt: true 
+      - name: Super-linter
+        uses: super-linter/super-linter@v7.1.0 # x-release-please-version
+        # env:
+        #   # To report GitHub Actions status checks
+        #   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
