@@ -100,6 +100,10 @@ func main() {
 		}
 	}
 
+	if c.debug {
+		fmt.Println("Config: ", c.env)
+	}
+
 	// The trigger channel is used to signal the syncData method to start syncing data
 	c.trigger = make(chan struct{})
 
@@ -437,12 +441,29 @@ func (c *SyncConfig) groupsUpdate(ld *ldap.Conn, username string, groups []strin
 	for _, g := range currentGroups {
 		if !slices.Contains(groups, g) {
 			// TODO Remove user from group
+			modifyRequest := ldap.NewModifyRequest("cn="+g+","+c.env["LDAP_DESTINATION_GROUPS_BASEDN"], []ldap.Control{})
+			modifyRequest.Delete("memberUid", []string{username})
+
+			err = ld.Modify(modifyRequest)
+
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
 		}
 	}
 
 	for _, g := range groups {
 		if !slices.Contains(currentGroups, g) {
 			// TODO Add user to group
+			modifyRequest := ldap.NewModifyRequest("cn="+g+","+c.env["LDAP_DESTINATION_GROUPS_BASEDN"], []ldap.Control{})
+			modifyRequest.Add("memberUid", []string{username})
+
+			err = ld.Modify(modifyRequest)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
 		}
 	}
 
@@ -677,7 +698,45 @@ func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error
 	}
 
 	fmt.Println("Users to delete: ", alreadyMap)
-	// TODO: Implement user deletion
+
+	for uid := range alreadyMap {
+		// Delete users that are no longer in the source LDAP server
+		searchRequest := ldap.NewSearchRequest(
+			c.env["LDAP_DESTINATION_USERS_BASEDN"],
+			ldap.ScopeWholeSubtree,
+			ldap.NeverDerefAliases,
+			0, 0, false,
+			"(uid="+uid+")",
+			[]string{"dn"},
+			nil,
+		)
+
+		sr, err := ld.Search(searchRequest)
+		if err != nil {
+			return err
+		}
+
+		if len(sr.Entries) == 0 {
+			fmt.Println("Warning: User not found in destination LDAP server. uid=" + uid)
+			continue
+		} else if len(sr.Entries) > 1 {
+			fmt.Println("Warning: Multiple entries found for uid=" + uid)
+			continue
+		}
+
+		deleteRequest := ldap.NewDelRequest(sr.Entries[0].DN, []ldap.Control{})
+		err = ld.Del(deleteRequest)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		err = c.groupsUpdate(ld, uid, []string{})
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+	}
 
 	return nil
 }
