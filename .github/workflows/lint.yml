@@ -8,26 +8,53 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# Down scope as necessary via https://docs.github.com/en/actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token
-permissions:
-  checks: write
-  contents: write
+permissions: {}
 
 jobs:
   run-linters:
     name: Run linters
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v4
+    permissions:
+          contents: read
+          pull-requests: read
+          packages: read
+          checks: write
+          # To report GitHub Actions status checks
+          statuses: write
 
-      # Install your linters here
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '^1.13.1'
-
-      - name: Run linters
-        uses: wearerequired/lint-action@v2
+          go-version: stable
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
         with:
-          gofmt: true 
+          version: v1.60
+          args: --issues-exit-code=0
+
+      # SUPER LINTER
+      # - name: Checkout code
+      #   uses: actions/checkout@v4
+      #   with:
+      #     # super-linter needs the full git history to get the
+      #     # list of files that changed across commits
+      #     fetch-depth: 0
+      #
+      # - name: Super-linter
+      #   uses: super-linter/super-linter@v7.1.0 # x-release-please-version
+      #   env:
+      #     # To report GitHub Actions status checks
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     DISABLE_ERRORS: true
+      #     SAVE_SUPER_LINTER_OUTPUT: true
+
+      # - run: ls -l
+      #
+      # - name: Annotate
+      #   uses: yuzutech/annotations-action@v0.4.0
+      #   with:
+      #     repo-token: "${{ secrets.GITHUB_TOKEN }}"
+      #     title: 'lint'
+      #     input: './super-linter-output'
