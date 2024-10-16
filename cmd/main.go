@@ -28,17 +28,21 @@ const (
 	statusSynced   = "synced"
 	statusPostfix  = "status"
 	prefix         = "req"
+	infoPrefix     = "info"
 	passCheck      = 10
-	delay          = 60
+	infoForce      = 10
+	syncDelay      = 60
+	infoDelay      = 60
 )
 
 var config = flag.String("config", "", "path to config file")
 var debug = flag.Bool("d", false, "enable debug mode")
 
 type SyncConfig struct {
-	debug   bool
-	env     map[string]string
-	trigger chan struct{}
+	debug       bool
+	env         map[string]string
+	syncTrigger chan struct{}
+	infoTrigger chan struct{}
 }
 
 type user struct {
@@ -105,7 +109,10 @@ func main() {
 	}
 
 	// The trigger channel is used to signal the syncData method to start syncing data
-	c.trigger = make(chan struct{})
+	c.syncTrigger = make(chan struct{})
+
+	// The info channel is used to signal the infoData method to start syncing users info
+	c.infoTrigger = make(chan struct{})
 
 	// Create the overall context
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -115,7 +122,7 @@ func main() {
 	go c.start(ctx)
 
 	// Trigger the init sync
-	c.trigger <- struct{}{}
+	c.syncTrigger <- struct{}{}
 
 	go func(ctx context.Context) {
 		// Start the period manager
@@ -131,15 +138,41 @@ func main() {
 				}
 				break loop
 
-			case <-time.After(delay * time.Second):
+			case <-time.After(syncDelay * time.Second):
 				if c.debug {
 					fmt.Println("Period manager: Triggering sync")
 				}
-				c.trigger <- struct{}{}
+				c.syncTrigger <- struct{}{}
 			}
 		}
 		if c.debug {
 			fmt.Println("Stopping period manager")
+		}
+	}(ctx)
+
+	go func(ctx context.Context) {
+		// Start the info manager
+		if c.debug {
+			fmt.Println("Starting info manager")
+		}
+	loop:
+		for {
+			select {
+			case <-ctx.Done():
+				if c.debug {
+					fmt.Println("Info manager: Received done signal")
+				}
+				break loop
+
+			case <-time.After(infoDelay * time.Second):
+				if c.debug {
+					fmt.Println("Info manager: Triggering sync")
+				}
+				c.infoTrigger <- struct{}{}
+			}
+		}
+		if c.debug {
+			fmt.Println("Stopping info manager")
 		}
 	}(ctx)
 
@@ -178,7 +211,12 @@ func (c *SyncConfig) handle(w http.ResponseWriter, r *http.Request) {
 	if c.debug {
 		fmt.Println("Web: Triggering sync")
 	}
-	c.trigger <- struct{}{}
+	c.syncTrigger <- struct{}{}
+
+	if c.debug {
+		fmt.Println("Web: Triggering info")
+	}
+	c.infoTrigger <- struct{}{}
 
 	// Respond to the request
 	w.WriteHeader(http.StatusOK)
@@ -227,11 +265,14 @@ func (c *SyncConfig) start(ctx context.Context) {
 		fmt.Println("Starting sync manager")
 	}
 
-	trigger := c.trigger
+	syncTrigger := c.syncTrigger
+	infoTrigger := c.infoTrigger
 	i := 0
+	j := 0
 loop:
 	for {
 		i++
+		j++
 		select {
 		case <-ctx.Done():
 			// The context is over, stop processing
@@ -239,7 +280,7 @@ loop:
 				fmt.Println("Sync manager: Received done signal")
 			}
 			break loop
-		case <-trigger:
+		case <-syncTrigger:
 			// Sync data
 			if c.debug {
 				fmt.Println("Sync manager: Received trigger")
@@ -247,6 +288,15 @@ loop:
 			c.syncData(i == passCheck)
 			if i == passCheck {
 				i = 0
+			}
+		case <-infoTrigger:
+			// Sync info
+			if c.debug {
+				fmt.Println("Sync manager: Received info trigger")
+			}
+			c.infoData(j == infoForce)
+			if j == infoForce {
+				j = 0
 			}
 		}
 	}
@@ -467,6 +517,67 @@ func (c *SyncConfig) groupsUpdate(ld *ldap.Conn, username string, groups []strin
 		}
 	}
 
+	return nil
+}
+
+func (c *SyncConfig) infoData(force bool) error {
+	r, err := c.getRedis()
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	allKeys, err := redis.Strings(r.Do("KEYS", prefix+":*:"+statusPostfix))
+	if err != nil {
+		return err
+	}
+
+	uids := make(map[string]struct{})
+	for _, key := range allKeys {
+		uid := strings.Split(key, ":")[1]
+
+		if force {
+			uids[uid] = struct{}{}
+		} else {
+			_, err := redis.String(r.Do("GET", infoPrefix+":"+uid+":name"))
+			if err != nil {
+				uids[uid] = struct{}{}
+			}
+		}
+	}
+
+	ls, err := ldap.DialURL(c.env["LDAP_SOURCE_URI"])
+	if err != nil {
+		return err
+	}
+
+	err = ls.Bind(c.env["LDAP_SOURCE_BINDDN"], c.env["LDAP_SOURCE_PASSWORD"])
+	if err != nil {
+		return err
+	}
+
+	for uid := range uids {
+		searchRequest := ldap.NewSearchRequest(
+			c.env["LDAP_SOURCE_BASEDN"],
+			ldap.ScopeWholeSubtree,
+			ldap.NeverDerefAliases,
+			0, 0, false,
+			"(uid="+uid+")",
+			[]string{"dn", "cn"},
+			nil,
+		)
+
+		sr, err := ls.Search(searchRequest)
+		if err != nil {
+			continue
+		}
+
+		if len(sr.Entries) == 1 {
+			name := sr.Entries[0].GetAttributeValue("cn")
+
+			r.Do("SET", infoPrefix+":"+uid+":name", name)
+		}
+	}
 	return nil
 }
 
