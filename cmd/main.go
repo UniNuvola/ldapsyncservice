@@ -550,6 +550,7 @@ func (c *SyncConfig) infoData(force bool) error {
 	if err != nil {
 		return err
 	}
+	defer ls.Close()
 
 	err = ls.Bind(c.env["LDAP_SOURCE_BINDDN"], c.env["LDAP_SOURCE_PASSWORD"])
 	if err != nil {
