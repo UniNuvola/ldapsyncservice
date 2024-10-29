@@ -78,6 +78,7 @@ func main() {
 		"REDIS_DATABASE":                 os.Getenv("REDIS_DATABASE"),
 		"REDIS_USERNAME":                 os.Getenv("REDIS_USERNAME"),
 		"REDIS_PASSWORD":                 os.Getenv("REDIS_PASSWORD"),
+		"TRIGGER_PORT":                   os.Getenv("TRIGGER_PORT"),
 	}
 
 	c.env = env
@@ -181,7 +182,7 @@ func main() {
 		fmt.Println("Starting web server")
 	}
 	s := &http.Server{
-		Addr:    ":8066",
+		Addr:    ":" + c.env["TRIGGER_PORT"],
 		Handler: http.HandlerFunc(c.handle),
 	}
 
