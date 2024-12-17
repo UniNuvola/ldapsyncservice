@@ -28,5 +28,6 @@ push: check
 
 .PHONY: tag
 tag: check
+	docker pull $(IMAGE):$(DEPLOYED)
 	docker tag $(IMAGE):$(DEPLOYED) $(IMAGE):deployed
 	docker push $(IMAGE):deployed
