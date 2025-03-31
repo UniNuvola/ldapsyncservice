@@ -3,7 +3,7 @@ include buildinfo.mk
 BRANCH=main
 
 .PHONY: all 
-all: check build push tag
+all: check build push quay
 
 .PHONY: check
 check:
