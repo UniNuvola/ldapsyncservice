@@ -705,7 +705,7 @@ func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error
 			fmt.Println("Warning: Multiple entries found for uid=" + uid)
 			continue
 		} else {
-			userDN = newUser.Entries[0].DN
+			userDN = sr.Entries[0].DN
 			userSN = newUser.Entries[0].GetAttributeValue("sn")
 			userEmail = newUser.Entries[0].GetAttributeValue("mail")
 			userGivenName = newUser.Entries[0].GetAttributeValue("givenName")
