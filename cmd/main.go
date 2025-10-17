@@ -238,7 +238,9 @@ func (c *SyncConfig) syncData(pwCheck bool) {
 		fmt.Println("Warning: Unable to get synced uids from ldap. Err=", err)
 	}
 
-	fmt.Println("Already synced uids: ", alreadySyncedUids)
+	if c.debug {
+		fmt.Println("Already synced uids: ", alreadySyncedUids)
+	}
 
 	uids2sync, err := c.getUids2Sync()
 	if err != nil {
@@ -487,7 +489,9 @@ func (c *SyncConfig) groupsUpdate(ld *ldap.Conn, username string, groups []strin
 		currentGroups[i] = cn
 	}
 
-	fmt.Println("Current groups: ", currentGroups)
+	if c.debug {
+		fmt.Println("Current groups: ", currentGroups)
+	}
 
 	for _, g := range currentGroups {
 		if !slices.Contains(groups, g) {
@@ -810,7 +814,9 @@ func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error
 		}
 	}
 
-	fmt.Println("Users to delete: ", alreadyMap)
+	if c.debug {
+		fmt.Println("Users to delete: ", alreadyMap)
+	}
 
 	for uid := range alreadyMap {
 		// Delete users that are no longer in the source LDAP server
