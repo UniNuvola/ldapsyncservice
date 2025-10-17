@@ -5,7 +5,7 @@ services:
                 ipv4_address: ${LDAPSYNC_IP}
         container_name: ldapsync
         image: harbor1.fisgeo.unipg.it/uninuvola/ldapsyncservice:main
-        command: /ldapsyncservice -d
+        command: /ldapsyncservice
         env_file: ../.env
 networks:
   uninuvola:
