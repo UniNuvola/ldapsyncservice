@@ -78,7 +78,12 @@ func main() {
 		"REDIS_DATABASE":                 os.Getenv("REDIS_DATABASE"),
 		"REDIS_USERNAME":                 os.Getenv("REDIS_USERNAME"),
 		"REDIS_PASSWORD":                 os.Getenv("REDIS_PASSWORD"),
-		"TRIGGER_PORT":                   os.Getenv("TRIGGER_PORT"),
+		"LDAPSYNC_PORT":                  os.Getenv("LDAPSYNC_PORT"),
+	}
+
+	// Set default port if not set
+	if env["LDAPSYNC_PORT"] == "" {
+		env["LDAPSYNC_PORT"] = "8066"
 	}
 
 	c.env = env
@@ -182,7 +187,7 @@ func main() {
 		fmt.Println("Starting web server")
 	}
 	s := &http.Server{
-		Addr:    ":" + c.env["TRIGGER_PORT"],
+		Addr:    ":" + c.env["LDAPSYNC_PORT"],
 		Handler: http.HandlerFunc(c.handle),
 	}
 
@@ -709,7 +714,11 @@ func (c *SyncConfig) syncUsers(already []user, users []user, pwCheck bool) error
 			fmt.Println("Warning: Multiple entries found for uid=" + uid)
 			continue
 		} else {
-			userDN = sr.Entries[0].DN
+			if len(sr.Entries) != 0 {
+				userDN = sr.Entries[0].DN
+			} else {
+				userDN = newUser.Entries[0].DN
+			}
 			userSN = newUser.Entries[0].GetAttributeValue("sn")
 			userEmail = newUser.Entries[0].GetAttributeValue("mail")
 			userGivenName = newUser.Entries[0].GetAttributeValue("givenName")
